@@ -6,25 +6,24 @@ if (!isLoggedIn()) {
     redirect('login.php');
 }
 
-$movieId = $_GET['movie_id'] ?? '';
-$movie = getMovieById($movieId);
+$showtimeId = $_GET['showtime_id'] ?? '';
+$showtime = getShowtimeById($showtimeId);
 
-if (!$movie) {
-    setFlashMessage('danger', 'Movie not found.');
+if (!$showtime) {
+    setFlashMessage('danger', 'Showtime not found.');
     redirect('movies.php');
 }
 
-$user = getCurrentUser();
-
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $seats = $_POST['seats'] ?? '';
-    $quantity = $_POST['quantity'] ?? 1;
-    $total = $movie['price'] * (int)$quantity;
     
     if (empty($seats)) {
         setFlashMessage('danger', 'Please select at least one seat.');
     } else {
-        $result = createBooking($_SESSION['user_id'], $movie['movie_id'], $seats, $total);
+        $seatList = explode(',', $seats);
+        $total = $showtime['price'] * count($seatList);
+        
+        $result = createBooking($_SESSION['user_id'], $showtimeId, $seatList, $total);
         if ($result['success']) {
             setFlashMessage('success', 'Booking confirmed! Order ID: #' . $result['order_id']);
             redirect('my-bookings.php');
@@ -33,6 +32,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 }
+
+// Re-fetch in case anything changed and build the seat grid
+$totalRows = (int)$showtime['total_rows'];
+$seatsPerRow = (int)$showtime['seats_per_row'];
+$bookedSeats = getBookedSeats($showtimeId);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -40,7 +44,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?= SITE_NAME ?> - Book Tickets</title>
-    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="assets/css/style.css">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
 </head>
 <body>
@@ -73,36 +77,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <div class="movie-summary">
                 <div class="thumb"><i class="fas fa-film"></i></div>
                 <div>
-                    <h2><?= htmlspecialchars($movie['movie_name']) ?></h2>
-                    <p><strong><i class="fas fa-star" style="color: #f59e0b;"></i> Rating:</strong> <?= $movie['rating_code'] ?></p>
-                    <p><strong><i class="fas fa-tag"></i> Price per ticket:</strong> <?= formatPrice($movie['price']) ?></p>
-                    <p><strong><i class="fas fa-tags"></i> Genres:</strong> <?= htmlspecialchars($movie['genres'] ?? '') ?></p>
+                    <h2><?= htmlspecialchars($showtime['movie_name']) ?></h2>
+                    <p><strong><i class="fas fa-calendar-day"></i> Date:</strong> <?= date('l, d M Y', strtotime($showtime['show_date'])) ?></p>
+                    <p><strong><i class="fas fa-clock"></i> Time:</strong> <?= date('h:i A', strtotime($showtime['show_time'])) ?></p>
+                    <p><strong><i class="fas fa-door-open"></i> Hall:</strong> <?= htmlspecialchars($showtime['hall_name']) ?></p>
+                    <p><strong><i class="fas fa-tag"></i> Price per ticket:</strong> <?= formatPrice($showtime['price']) ?></p>
                 </div>
             </div>
 
             <form method="POST" action="">
                 <h3><i class="fas fa-chair"></i> Select Your Seats</h3>
                 <p style="color: #666; margin-bottom: 15px; font-size: 14px;">
-                    <i class="fas fa-info-circle"></i> Click on available seats to select them. Selected seats will be highlighted.
+                    <i class="fas fa-info-circle"></i> Click on available seats to select them. Seats already booked for this showtime are disabled.
                 </p>
                 
-                <div style="margin-bottom: 20px;">
-                    <label for="quantity"><strong><i class="fas fa-ticket-alt"></i> Number of Tickets:</strong></label>
-                    <select id="quantity" name="quantity" style="padding: 10px 16px; margin-left: 12px; border: 2px solid var(--gray-light); border-radius: var(--radius-sm); font-size: 15px; background: var(--white);">
-                        <?php for ($i = 1; $i <= 10; $i++): ?>
-                            <option value="<?= $i ?>"><?= $i ?></option>
-                        <?php endfor; ?>
-                    </select>
-                </div>
-                
-                <div class="seat-grid">
-                    <?php for ($row = 'A'; $row <= 'J'; $row++): ?>
-                        <?php for ($col = 1; $col <= 10; $col++): ?>
+                <div class="seat-grid" style="grid-template-columns: repeat(<?= $seatsPerRow ?>, 1fr);">
+                    <?php for ($r = 0; $r < $totalRows; $r++): ?>
+                        <?php $rowLetter = chr(65 + $r); ?>
+                        <?php for ($c = 1; $c <= $seatsPerRow; $c++): ?>
                             <?php
-                            $seatId = $row . $col;
-                            $isBooked = false; // In real system, check database
+                            $seatId = $rowLetter . $c;
+                            $isBooked = in_array($seatId, $bookedSeats);
                             ?>
-                            <div class="seat <?= $isBooked ? 'booked' : 'available' ?>" data-seat="<?= $seatId ?>" onclick="toggleSeat(this)">
+                            <div class="seat <?= $isBooked ? 'booked' : 'available' ?>" data-seat="<?= $seatId ?>" <?= $isBooked ? '' : 'onclick="toggleSeat(this)"' ?>>
                                 <?= $seatId ?>
                             </div>
                         <?php endfor; ?>
@@ -124,7 +121,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     </p>
                     <p style="font-size: 20px; margin-top: 8px;">
                         <strong><i class="fas fa-money-bill-wave"></i> Total Price:</strong> 
-                        <span id="totalDisplay" style="color: var(--primary); font-weight: 800;"><?= formatPrice($movie['price']) ?></span>
+                        <span id="totalDisplay" style="color: var(--primary); font-weight: 800;">RM 0.00</span>
                     </p>
                 </div>
                 
@@ -136,7 +133,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     </main>
 
     <script>
-        const pricePerTicket = <?= $movie['price'] ?>;
+        const pricePerTicket = <?= $showtime['price'] ?>;
         let selectedSeats = new Set();
         
         function toggleSeat(element) {
@@ -160,14 +157,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             document.getElementById('selectedSeats').value = seats.join(',');
             document.getElementById('seatDisplay').textContent = seats.join(', ') || 'None';
             
-            const quantity = parseInt(document.getElementById('quantity').value);
             const total = selectedSeats.size * pricePerTicket;
             document.getElementById('totalDisplay').textContent = 'RM ' + total.toFixed(2);
         }
         
-        document.getElementById('quantity').addEventListener('change', updateDisplay);
-        
-        // Initialize
         updateDisplay();
     </script>
 

@@ -15,7 +15,7 @@ if (!$movie) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title><?= SITE_NAME ?> - <?= htmlspecialchars($movie['movie_name']) ?></title>
-    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="assets/css/style.css">
 </head>
 <body>
     <header>
@@ -77,7 +77,7 @@ if (!$movie) {
                 </div>
                 
                 <?php if (isLoggedIn()): ?>
-                    <a href="booking.php?movie_id=<?= $movie['movie_id'] ?>" class="btn btn-primary" style="padding: 14px 40px; font-size: 16px;">🎫 Book Now</a>
+                    <a href="select-showtime.php?movie_id=<?= $movie['movie_id'] ?>" class="btn btn-primary" style="padding: 14px 40px; font-size: 16px;">🎫 Book Now</a>
                 <?php else: ?>
                     <div style="margin-top: 20px; padding: 15px; background: var(--light); border-radius: var(--radius-sm); text-align: center;">
                         <p style="color: var(--gray);">Please <a href="login.php" style="font-weight: 600;">login</a> to book tickets.</p>

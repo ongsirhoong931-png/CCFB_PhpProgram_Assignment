@@ -26,6 +26,7 @@ $bookingStats = getBookingsStatistics();
             <nav>
                 <ul>
                     <li><a href="index.php" class="active"><i class="fas fa-home"></i> Home</a></li>
+                    <li><a href="showtimes.php"><i class="fas fa-clock"></i> Showtimes</a></li>
                     <li><a href="movies.php"><i class="fas fa-film"></i> Movies</a></li>
                     <?php if (isLoggedIn()): ?>
                         <li><a href="my-bookings.php"><i class="fas fa-ticket-alt"></i> My Bookings</a></li>

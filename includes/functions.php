@@ -1,6 +1,6 @@
 <?php
 // ============================================
-// HELPER FUNCTIONS - FIXED VERSION
+// HELPER FUNCTIONS - WITH SHOWTIME MODULE
 // ============================================
 
 require_once 'db_connection.php';
@@ -215,27 +215,194 @@ function deleteMovie($movieId) {
     return $db->query($sql);
 }
 
+// ---------- HALL FUNCTIONS ----------
+
+function getAllHalls() {
+    $db = getDB();
+    $result = $db->query("SELECT * FROM halls ORDER BY hall_name");
+    $halls = [];
+    if ($result && $result->num_rows > 0) {
+        while ($row = $result->fetch_assoc()) {
+            $halls[] = $row;
+        }
+    }
+    return $halls;
+}
+
+function getHallById($hallId) {
+    $db = getDB();
+    $hallId = (int)$hallId;
+    $result = $db->query("SELECT * FROM halls WHERE hall_id = $hallId");
+    if ($result && $result->num_rows > 0) {
+        return $result->fetch_assoc();
+    }
+    return null;
+}
+
+// ---------- SHOWTIME FUNCTIONS ----------
+
+function getShowtimesByMovie($movieId) {
+    $db = getDB();
+    $movieId = $db->real_escape_string($movieId);
+    
+    $sql = "SELECT s.*, h.hall_name, h.total_rows, h.seats_per_row
+            FROM showtimes s
+            JOIN halls h ON s.hall_id = h.hall_id
+            WHERE s.movie_id = '$movieId'
+              AND (s.show_date > CURDATE() OR (s.show_date = CURDATE() AND s.show_time >= CURTIME()))
+            ORDER BY s.show_date, s.show_time";
+    
+    $result = $db->query($sql);
+    $showtimes = [];
+    if ($result && $result->num_rows > 0) {
+        while ($row = $result->fetch_assoc()) {
+            $showtimes[] = $row;
+        }
+    }
+    return $showtimes;
+}
+
+function getShowtimeById($showtimeId) {
+    $db = getDB();
+    $showtimeId = (int)$showtimeId;
+    
+    $sql = "SELECT s.*, h.hall_name, h.total_rows, h.seats_per_row, m.movie_name, m.price
+            FROM showtimes s
+            JOIN halls h ON s.hall_id = h.hall_id
+            JOIN movies m ON s.movie_id = m.movie_id
+            WHERE s.showtime_id = $showtimeId";
+    
+    $result = $db->query($sql);
+    if ($result && $result->num_rows > 0) {
+        return $result->fetch_assoc();
+    }
+    return null;
+}
+
+function getAllShowtimes() {
+    $db = getDB();
+    
+    $sql = "SELECT s.*, h.hall_name, m.movie_name
+            FROM showtimes s
+            JOIN halls h ON s.hall_id = h.hall_id
+            JOIN movies m ON s.movie_id = m.movie_id
+            ORDER BY s.show_date DESC, s.show_time DESC";
+    
+    $result = $db->query($sql);
+    $showtimes = [];
+    if ($result && $result->num_rows > 0) {
+        while ($row = $result->fetch_assoc()) {
+            $showtimes[] = $row;
+        }
+    }
+    return $showtimes;
+}
+
+function addShowtime($movieId, $hallId, $showDate, $showTime) {
+    $db = getDB();
+    $movieId = $db->real_escape_string($movieId);
+    $hallId = (int)$hallId;
+    $showDate = $db->real_escape_string($showDate);
+    $showTime = $db->real_escape_string($showTime);
+    
+    $sql = "INSERT INTO showtimes (movie_id, hall_id, show_date, show_time) 
+            VALUES ('$movieId', $hallId, '$showDate', '$showTime')";
+    
+    return $db->query($sql);
+}
+
+function updateShowtime($showtimeId, $movieId, $hallId, $showDate, $showTime) {
+    $db = getDB();
+    $showtimeId = (int)$showtimeId;
+    $movieId = $db->real_escape_string($movieId);
+    $hallId = (int)$hallId;
+    $showDate = $db->real_escape_string($showDate);
+    $showTime = $db->real_escape_string($showTime);
+    
+    $sql = "UPDATE showtimes SET 
+            movie_id = '$movieId',
+            hall_id = $hallId,
+            show_date = '$showDate',
+            show_time = '$showTime'
+            WHERE showtime_id = $showtimeId";
+    
+    return $db->query($sql);
+}
+
+function deleteShowtime($showtimeId) {
+    $db = getDB();
+    $showtimeId = (int)$showtimeId;
+    
+    $sql = "DELETE FROM showtimes WHERE showtime_id = $showtimeId";
+    return $db->query($sql);
+}
+
+// ---------- SEAT AVAILABILITY FUNCTIONS ----------
+
+function getBookedSeats($showtimeId) {
+    $db = getDB();
+    $showtimeId = (int)$showtimeId;
+    
+    $result = $db->query("SELECT seat_code FROM booked_seats WHERE showtime_id = $showtimeId");
+    $seats = [];
+    if ($result && $result->num_rows > 0) {
+        while ($row = $result->fetch_assoc()) {
+            $seats[] = $row['seat_code'];
+        }
+    }
+    return $seats;
+}
+
 // ---------- BOOKING FUNCTIONS ----------
 
-function createBooking($userId, $movieId, $seats, $total) {
+function createBooking($userId, $showtimeId, $seats, $total) {
     $db = getDB();
+    $userId = (int)$userId;
+    $showtimeId = (int)$showtimeId;
+    $total = (float)$total;
+    
+    $seatList = is_array($seats) ? $seats : explode(',', $seats);
+    $seatList = array_values(array_filter(array_map('trim', $seatList)));
+    
+    if (empty($seatList)) {
+        return ['success' => false, 'message' => 'No seats selected'];
+    }
+    
+    $showtime = getShowtimeById($showtimeId);
+    if (!$showtime) {
+        return ['success' => false, 'message' => 'Showtime not found'];
+    }
     
     // Start transaction
     $db->begin_transaction();
     
     try {
+        // Re-check seat availability inside the transaction to avoid
+        // two people booking the same seat at the same time
+        $alreadyBooked = getBookedSeats($showtimeId);
+        $conflict = array_intersect($seatList, $alreadyBooked);
+        if (!empty($conflict)) {
+            $db->rollback();
+            return ['success' => false, 'message' => 'Seat(s) ' . implode(', ', $conflict) . ' were just taken by someone else. Please choose again.'];
+        }
+        
         // Insert order
-        $userId = (int)$userId;
-        $total = (float)$total;
         $sql = "INSERT INTO `order` (user_id, total, status) VALUES ($userId, $total, 'Confirmed')";
         $db->query($sql);
         $orderId = $db->insert_id;
         
-        // Insert item (movie booking)
-        $movieId = $db->real_escape_string($movieId);
-        $sql = "INSERT INTO item (order_id, product_id, unit, price) 
-                VALUES ($orderId, '$movieId', 1, $total)";
+        // Insert item (movie booking) linked to the showtime
+        $movieId = $db->real_escape_string($showtime['movie_id']);
+        $unit = count($seatList);
+        $sql = "INSERT INTO item (order_id, product_id, showtime_id, unit, price) 
+                VALUES ($orderId, '$movieId', $showtimeId, $unit, $total)";
         $db->query($sql);
+        
+        // Lock in each individual seat
+        foreach ($seatList as $seat) {
+            $seat = $db->real_escape_string($seat);
+            $db->query("INSERT INTO booked_seats (showtime_id, seat_code, order_id) VALUES ($showtimeId, '$seat', $orderId)");
+        }
         
         $db->commit();
         return ['success' => true, 'order_id' => $orderId];
@@ -249,10 +416,13 @@ function getUserBookings($userId) {
     $db = getDB();
     $userId = (int)$userId;
     
-    $sql = "SELECT o.*, i.product_id, i.unit, i.price as item_price, m.movie_name 
+    $sql = "SELECT o.*, i.product_id, i.unit, i.price as item_price, i.showtime_id,
+                   m.movie_name, s.show_date, s.show_time, h.hall_name
             FROM `order` o 
             JOIN item i ON o.id = i.order_id 
             JOIN movies m ON i.product_id = m.movie_id 
+            LEFT JOIN showtimes s ON i.showtime_id = s.showtime_id
+            LEFT JOIN halls h ON s.hall_id = h.hall_id
             WHERE o.user_id = $userId 
             ORDER BY o.order_date DESC";
     
@@ -275,11 +445,14 @@ function getUserBookings($userId) {
 function getAllBookings() {
     $db = getDB();
     
-    $sql = "SELECT o.*, u.username, u.full_name, i.product_id, m.movie_name 
+    $sql = "SELECT o.*, u.username, u.full_name, i.product_id, i.showtime_id,
+                   m.movie_name, s.show_date, s.show_time, h.hall_name
             FROM `order` o 
             JOIN user u ON o.user_id = u.user_id
             JOIN item i ON o.id = i.order_id 
             JOIN movies m ON i.product_id = m.movie_id 
+            LEFT JOIN showtimes s ON i.showtime_id = s.showtime_id
+            LEFT JOIN halls h ON s.hall_id = h.hall_id
             ORDER BY o.order_date DESC";
     
     $result = $db->query($sql);
@@ -304,7 +477,14 @@ function updateOrderStatus($orderId, $status) {
     $status = $db->real_escape_string($status);
     
     $sql = "UPDATE `order` SET status = '$status' WHERE id = $orderId";
-    return $db->query($sql);
+    $result = $db->query($sql);
+    
+    // If a booking is cancelled, free up its seats so others can book them
+    if ($result && $status === 'Cancelled') {
+        $db->query("DELETE FROM booked_seats WHERE order_id = $orderId");
+    }
+    
+    return $result;
 }
 
 // ---------- UTILITY FUNCTIONS ----------
